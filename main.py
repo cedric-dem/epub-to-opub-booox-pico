@@ -16,6 +16,7 @@ container ("BFPE" magic):
 """
 
 import hashlib
+import math
 import io
 import os
 import posixpath
@@ -744,14 +745,49 @@ def split_text(t):
 # Images
 # ---------------------------------------------------------------------------
 def gray_fit(im):
-    """8-bit grayscale, shrunk (nearest neighbour, like the reference) to fit the screen.
-    The reference also applies a per-image gamma whose selection rule is unknown; we keep 1.0."""
+    """8-bit grayscale, shrunk (nearest neighbour, like the reference) to fit the screen,
+    then gamma-corrected like the reference (see auto_gamma)."""
     im = im.convert("L")
     w, h = im.size
     scale = min(SCREEN_W / w, SCREEN_H / h, 1.0)
     if scale < 1.0:
         im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.NEAREST)
+    g = auto_gamma(im)
+    if g != 1.0:
+        im = im.point([round(255 * (v / 255) ** g) for v in range(256)])
     return im
+
+
+# The reference applies out = 255 * (in / 255) ** gamma to every grayscale image, with a
+# per-image gamma clamped to [0.4, 2.5]. Its selection rule is unknown, so gamma is predicted
+# from histogram features: a ridge regression on log(gamma), fitted on the exact gammas of
+# 1134 reference images (28 books). Held out per book, it cuts the mean pixel error vs. the
+# reference from ~10.6 to ~7.3 gray levels; it is not byte exact.
+GAMMA_PCTS = (1, 5, 10, 25, 50, 75, 90, 95, 99)
+GAMMA_COEF = (-0.84067, 0.06251, 0.33954, -0.25472, 0.09302, -0.22341, -0.05066,  # const, mean, mean^2,
+              0.32454, -0.07907, 0.25184, -0.17332, 0.07299, 0.01815, 0.03499,     # sd, log-mean, white,
+              0.78651, 0.22114)                                                    # black, percentiles
+GAMMA_MIN, GAMMA_MAX = 0.4, 2.5
+
+
+def auto_gamma(gray):
+    hist = gray.histogram()
+    n = float(sum(hist))
+    if not n:
+        return 1.0
+    h = [c / n for c in hist]
+    mean = sum(p * v / 255 for v, p in enumerate(h))
+    sd = math.sqrt(sum(p * (v / 255 - mean) ** 2 for v, p in enumerate(h)))
+    lmean = sum(p * math.log(max(v, 1) / 255) for v, p in enumerate(h))
+    pcts, cdf, v = [], 0.0, 0
+    for p in GAMMA_PCTS:
+        while v < 256 and cdf + h[v] < p / 100:
+            cdf += h[v]
+            v += 1
+        pcts.append(min(v, 255) / 255)
+    feats = [1.0, mean, mean * mean, sd, lmean, sum(h[250:]), sum(h[:6])] + pcts
+    g = math.exp(sum(c * f for c, f in zip(GAMMA_COEF, feats)))
+    return min(GAMMA_MAX, max(GAMMA_MIN, g))
 
 
 def atkinson(im):

@@ -16,7 +16,9 @@ For each EPUB, the converter:
   headings, inline text and links (margins, indents, alignment, font size, line height,
   colour, italics)
 - splits the text into records of up to 200 bytes of UTF-8
-- converts images to 8-bit grayscale and makes 1-bit Atkinson-dithered cover thumbnails
+- converts images to 8-bit grayscale with a per-image gamma correction (predicted from the
+  image histogram to approximate the reference tool, whose exact rule is unknown) and makes
+  1-bit Atkinson-dithered cover thumbnails
   (256×384, 176×264, 128×192)
 - writes metadata (`bookId`, `md5sum`, ISBN, creator, publisher, title, language)
 - adds a default "external cover" image set from `assets/external_cover.bin`
@@ -50,6 +52,7 @@ To use other folders, change `SRC_DIR` and `DST_DIR` at the top of `main.py`.
 
 ```
 main.py                          converter (single script)
+compare_results.py               byte-for-byte check of recreated_opub against opub
 requirements.txt                 Python dependencies
 assets/external_cover.bin        zlib-compressed default cover images (required)
 sample_library/
@@ -75,5 +78,13 @@ full_library/                    larger personal library (git-ignored)
 
 ## Comparing with the reference output
 
-`sample_library/opub/` holds OPUBs made by the original tool from the same EPUBs. Compare
-them with the files in `sample_library/recreated_opub/` to check the converter's output.
+`sample_library/opub/` holds OPUBs made by the original tool from the same EPUBs. To check
+the converter's output against them, run:
+
+```powershell
+python compare_results.py
+```
+
+For each file in `sample_library/opub/`, it prints whether the file of the same name in
+`sample_library/recreated_opub/` is `IDENTICAL` (byte for byte), `DIFFERENT` or `MISSING`,
+then a summary line. It exits with code 0 only if every file is identical.
